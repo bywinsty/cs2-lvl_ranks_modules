@@ -170,7 +170,17 @@ jobs:
           vdf_path="$(find "$package_root/metamod" -maxdepth 1 -type f -name '*.vdf' -print)"
           test "$(printf '%s\n' "$binary_path" | sed '/^$/d' | wc -l)" -eq 1
           test "$(printf '%s\n' "$vdf_path" | sed '/^$/d' | wc -l)" -eq 1
-          test "$(find "$package_root" -type f | wc -l)" -eq 2
+          package_file_count="$(find "$package_root" -type f | wc -l)"
+          test "$package_file_count" -ge 2
+          extra_files="$(find "$package_root" -type f ! -path "$binary_path" ! -path "$vdf_path")"
+          if [[ -n "$extra_files" ]]; then
+            while IFS= read -r extra_file; do
+              case "$extra_file" in
+                "$package_root/configs/vip/"*) ;;
+                *) echo "Unexpected extra package file: $extra_file" >&2; exit 1 ;;
+              esac
+            done <<< "$extra_files"
+          fi
           file "$binary_path" | grep -q 'ELF 64-bit'
           readelf -h "$binary_path" | grep -Eq 'Machine:.*(Advanced Micro Devices X86-64|x86-64)'
           package_dir="$GITHUB_WORKSPACE/$BUILD_ROOT/build/package"
