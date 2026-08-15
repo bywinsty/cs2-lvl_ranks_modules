@@ -23,7 +23,7 @@ jobs:
       modules: ${{ steps.discover.outputs.modules }}
       count: ${{ steps.discover.outputs.count }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: discover
         env:
           EXPECTED_MODULES: "9"
@@ -65,7 +65,7 @@ jobs:
       MANIFEST_PATH: ${{ github.workspace }}/${{ matrix.build_root }}/hl2sdk-manifests
       PACKAGE_DIR: lr_modules
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install dependencies
         run: |
           sudo apt-get update -qy
@@ -124,7 +124,7 @@ jobs:
           ! grep -q 'FL_PAWN_FAKECLIENT\|FL_CONTROLLER_FAKECLIENT' "$schema_root/CCSPlayerPawn.h" "$schema_root/CCSPlayerController.h"
       - name: Prepare and validate SDK manifest
         run: |
-          proto_path="$GITHUB_WORKSPACE/external/hl2sdk/hl2sdk-cs2/common/network_connection.proto"
+          proto_path="$GITHUB_WORKSPACE/external/hl2sdk-cs2/common/network_connection.proto"
           if ! grep -q '^syntax = ' "$proto_path"; then
             sed -i '1i syntax = "proto2";' "$proto_path"
           fi
