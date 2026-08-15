@@ -1,7 +1,5 @@
 name: Build LR Modules
 on:
-  push:
-    branches: [dev, PR, main]
   pull_request:
     branches: [dev, PR, main]
   workflow_dispatch:
