@@ -1,0 +1,216 @@
+name: Build LR Modules
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [PR, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AMBUILD_REF: d89ec91a7ac2607da07b50bb62346f9a10e9a998
+  MMS_REF: 2667e8e5947237c4cb7ea45cec3913ad6a44757c
+  HL2SDK_REF: 80cf8554d716a3841fe0680013cae3411a056a8d
+  SCHEMAENTITY_REF: e7965b3c83ec684d44584ee6457c5482ee5d9db1
+  MANIFEST_REF: 20b3a014264b38908c4a5d4eb263ba2c488f3dc1
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    outputs:
+      modules: ${{ steps.discover.outputs.modules }}
+      count: ${{ steps.discover.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: discover
+        env:
+          EXPECTED_MODULES: "9"
+          ARTIFACT_PREFIX: "lr-module"
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path.cwd()
+          required = ["AMBuildScript", "AMBuilder", "PackageScript", "configure.py", "hl2sdk-manifests/SdkHelpers.ambuild", "hl2sdk-manifests/manifests/cs2.json"]
+          entries = []
+          for module_dir in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+              build_root = next((p for p in (module_dir, module_dir / "source", module_dir / "src") if (p / "AMBuildScript").is_file()), None)
+              if build_root is None:
+                  continue
+              missing = [item for item in required if not (build_root / item).is_file()]
+              if missing:
+                  raise SystemExit(f"{module_dir.name}: missing build files: {missing}")
+              entries.append({"module": module_dir.name, "module_dir": module_dir.relative_to(root).as_posix(), "build_root": build_root.relative_to(root).as_posix(), "artifact_name": f"{os.environ['ARTIFACT_PREFIX']}-{module_dir.name}"})
+          if len(entries) != int(os.environ["EXPECTED_MODULES"]):
+              raise SystemExit(f"expected {os.environ['EXPECTED_MODULES']} modules, found {len(entries)}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("modules=" + json.dumps(entries, separators=(",", ":")) + "\n")
+              out.write(f"count={len(entries)}\n")
+          PY
+
+  build-module:
+    needs: discover
+    if: ${{ needs.discover.result == 'success' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.modules) }}
+    env:
+      MODULE_DIR: ${{ matrix.module_dir }}
+      BUILD_ROOT: ${{ matrix.build_root }}
+      MANIFEST_PATH: ${{ github.workspace }}/${{ matrix.build_root }}/hl2sdk-manifests
+      PACKAGE_DIR: lr_modules
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -y binutils clang-18 file git libmaxminddb-dev python3 python3-pip unzip zip
+          python3 -m pip install --upgrade pip importlib-metadata
+          python3 -m pip install setuptools==45.2.0
+      - name: Checkout pinned dependencies
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/external"
+          git clone --depth 1 --no-checkout https://github.com/alliedmodders/ambuild.git "$GITHUB_WORKSPACE/ambuild"
+          git -C "$GITHUB_WORKSPACE/ambuild" fetch --depth 1 origin "$AMBUILD_REF"
+          git -C "$GITHUB_WORKSPACE/ambuild" checkout --detach "$AMBUILD_REF"
+          python3 -m pip install "$GITHUB_WORKSPACE/ambuild"
+          git clone --depth 1 --no-checkout https://github.com/alliedmodders/metamod-source.git "$GITHUB_WORKSPACE/external/metamod-source"
+          git -C "$GITHUB_WORKSPACE/external/metamod-source" fetch --depth 1 origin "$MMS_REF"
+          git -C "$GITHUB_WORKSPACE/external/metamod-source" checkout --detach "$MMS_REF"
+          git -C "$GITHUB_WORKSPACE/external/metamod-source" submodule update --init --recursive
+          git clone --depth 1 --no-checkout https://github.com/alliedmodders/hl2sdk.git "$GITHUB_WORKSPACE/external/hl2sdk-cs2"
+          git -C "$GITHUB_WORKSPACE/external/hl2sdk-cs2" fetch --depth 1 origin "$HL2SDK_REF"
+          git -C "$GITHUB_WORKSPACE/external/hl2sdk-cs2" checkout --detach "$HL2SDK_REF"
+          git -C "$GITHUB_WORKSPACE/external/hl2sdk-cs2" submodule update --init --recursive
+          schema_root="$GITHUB_WORKSPACE/../SchemaEntity"
+          git clone --depth 1 --no-checkout https://github.com/pisex/SchemaEntity.git "$schema_root"
+          git -C "$schema_root" fetch --depth 1 origin "$SCHEMAENTITY_REF"
+          git -C "$schema_root" checkout --detach "$SCHEMAENTITY_REF"
+          if [[ "$BUILD_ROOT" == "$MODULE_DIR" ]]; then
+            schema_link="$GITHUB_WORKSPACE/SchemaEntity"
+          else
+            schema_link="$GITHUB_WORKSPACE/$MODULE_DIR/SchemaEntity"
+          fi
+          rm -rf "$schema_link"
+          ln -s "$schema_root" "$schema_link"
+          rm -rf "$MANIFEST_PATH"
+          mkdir -p "$MANIFEST_PATH"
+          cp -R "$GITHUB_WORKSPACE/external/metamod-source/hl2sdk-manifests/." "$MANIFEST_PATH/"
+          test "$(git -C "$GITHUB_WORKSPACE/ambuild" rev-parse HEAD)" = "$AMBUILD_REF"
+          test "$(git -C "$GITHUB_WORKSPACE/external/metamod-source" rev-parse HEAD)" = "$MMS_REF"
+          test "$(git -C "$GITHUB_WORKSPACE/external/metamod-source/hl2sdk-manifests" rev-parse HEAD)" = "$MANIFEST_REF"
+          test "$(git -C "$GITHUB_WORKSPACE/external/hl2sdk-cs2" rev-parse HEAD)" = "$HL2SDK_REF"
+          test "$(git -C "$schema_root" rev-parse HEAD)" = "$SCHEMAENTITY_REF"
+      - name: Prepare compatibility patches
+        run: |
+          schema_root="$GITHUB_WORKSPACE/../SchemaEntity"
+          sed -i '/#include "schemasystem.h"/a #include "gametrace.h"' "$schema_root/globaltypes.h"
+          sed -i 's/NetworkStateChanged_t/NetworkStateChangedData/g' "$schema_root/schemasystem.cpp"
+          sed -i 's/FL_PAWN_FAKECLIENT/FL_BOT/g; s/FL_CONTROLLER_FAKECLIENT/FL_FAKECLIENT/g' "$schema_root/CCSPlayerPawn.h" "$schema_root/CCSPlayerController.h"
+          python3 - "$schema_root/ctimer.h" <<'PY'
+          import sys
+          from pathlib import Path
+          timer_path = Path(sys.argv[1])
+          content = timer_path.read_text()
+          needle = "class CTimerBase {\npublic:\n"
+          if "virtual ~CTimerBase()" in content:
+              raise SystemExit("CTimerBase destructor patch is already present")
+          if needle not in content:
+              raise SystemExit("Expected CTimerBase declaration was not found")
+          timer_path.write_text(content.replace(needle, needle + "    virtual ~CTimerBase() = default;\n", 1))
+          PY
+          grep -q '#include "gametrace.h"' "$schema_root/globaltypes.h"
+          ! grep -q 'NetworkStateChanged_t' "$schema_root/schemasystem.cpp"
+          ! grep -q 'FL_PAWN_FAKECLIENT\|FL_CONTROLLER_FAKECLIENT' "$schema_root/CCSPlayerPawn.h" "$schema_root/CCSPlayerController.h"
+      - name: Prepare and validate SDK manifest
+        run: |
+          proto_path="$GITHUB_WORKSPACE/external/hl2sdk-cs2/common/network_connection.proto"
+          if ! grep -q '^syntax = ' "$proto_path"; then
+            sed -i '1i syntax = "proto2";' "$proto_path"
+          fi
+          grep -q '^syntax = "proto2";$' "$proto_path"
+          python3 - "$MANIFEST_PATH/manifests/cs2.json" "$GITHUB_WORKSPACE/external/hl2sdk-cs2" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          manifest_path = Path(sys.argv[1])
+          sdk_root = Path(sys.argv[2])
+          manifest = json.loads(manifest_path.read_text())
+          manifest["include_paths"] = [path for path in manifest["include_paths"] if (sdk_root / path).is_dir()]
+          manifest_path.write_text(json.dumps(manifest, indent=4) + "\n")
+          PY
+          test -f "$MANIFEST_PATH/SdkHelpers.ambuild"
+          test -f "$MANIFEST_PATH/manifests/cs2.json"
+          test -f "$GITHUB_WORKSPACE/external/hl2sdk-cs2/public/tier1/generichash.h"
+          test ! -f "$GITHUB_WORKSPACE/external/hl2sdk-cs2/tier1/generichash.cpp"
+          sed -i "/tier1', 'generichash.cpp/d" "$GITHUB_WORKSPACE/$BUILD_ROOT/AMBuildScript"
+          ! grep -q "tier1', 'generichash.cpp" "$GITHUB_WORKSPACE/$BUILD_ROOT/AMBuildScript"
+      - name: Configure and build
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          rm -rf "$GITHUB_WORKSPACE/$BUILD_ROOT/build"
+          mkdir -p "$GITHUB_WORKSPACE/$BUILD_ROOT/build"
+          cd "$GITHUB_WORKSPACE/$BUILD_ROOT/build"
+          python3 ../configure.py --sdks cs2 --targets x86_64 --enable-optimize --hl2sdk-manifests="$MANIFEST_PATH" --mms_path="$GITHUB_WORKSPACE/external/metamod-source" --hl2sdk-root="$GITHUB_WORKSPACE/external"
+          ambuild
+      - name: Validate package and create report
+        run: |
+          package_root="$GITHUB_WORKSPACE/$BUILD_ROOT/build/package/addons"
+          binary_root="$package_root/$PACKAGE_DIR"
+          test -d "$binary_root"
+          test -d "$package_root/metamod"
+          binary_path="$(find "$binary_root" -maxdepth 1 -type f -name '*.so' -print)"
+          vdf_path="$(find "$package_root/metamod" -maxdepth 1 -type f -name '*.vdf' -print)"
+          test "$(printf '%s\n' "$binary_path" | sed '/^$/d' | wc -l)" -eq 1
+          test "$(printf '%s\n' "$vdf_path" | sed '/^$/d' | wc -l)" -eq 1
+          package_file_count="$(find "$package_root" -type f | wc -l)"
+          test "$package_file_count" -ge 2
+          extra_files="$(find "$package_root" -type f ! -path "$binary_path" ! -path "$vdf_path")"
+          if [[ -n "$extra_files" ]]; then
+            while IFS= read -r extra_file; do
+              case "$extra_file" in
+                "$package_root/configs/vip/"*) ;;
+                *) echo "Unexpected extra package file: $extra_file" >&2; exit 1 ;;
+              esac
+            done <<< "$extra_files"
+          fi
+          file "$binary_path" | grep -q 'ELF 64-bit'
+          readelf -h "$binary_path" | grep -Eq 'Machine:.*(Advanced Micro Devices X86-64|x86-64)'
+          package_dir="$GITHUB_WORKSPACE/$BUILD_ROOT/build/package"
+          archive="$GITHUB_WORKSPACE/${{ matrix.artifact_name }}.tar.gz"
+          report="$GITHUB_WORKSPACE/${{ matrix.artifact_name }}-BUILD_REPORT.md"
+          checksum="$GITHUB_WORKSPACE/${{ matrix.artifact_name }}.sha256"
+          tar -czf "$archive" -C "$package_dir" addons
+          sha256sum "$archive" > "$checksum"
+          printf 'module=%s\nbuild_root=%s\ncommit=%s\narch=x86_64\n' "${{ matrix.module }}" "$BUILD_ROOT" "${{ github.sha }}" > "$report"
+          test -s "$archive" && test -s "$checksum" && test -s "$report"
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}.tar.gz
+            ${{ matrix.artifact_name }}.sha256
+            ${{ matrix.artifact_name }}-BUILD_REPORT.md
+          if-no-files-found: error
+          retention-days: 14
+
+  build-summary:
+    needs: [discover, build-module]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          BUILD_RESULT: ${{ needs.build-module.result }}
+        run: |
+          test "$DISCOVER_RESULT" = success
+          test "$BUILD_RESULT" = success
+          echo "All module builds passed."
