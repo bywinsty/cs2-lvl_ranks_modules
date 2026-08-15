@@ -91,8 +91,13 @@ jobs:
           git clone --depth 1 --no-checkout https://github.com/pisex/SchemaEntity.git "$schema_root"
           git -C "$schema_root" fetch --depth 1 origin "$SCHEMAENTITY_REF"
           git -C "$schema_root" checkout --detach "$SCHEMAENTITY_REF"
-          rm -rf "$GITHUB_WORKSPACE/$MODULE_DIR/SchemaEntity"
-          ln -s "$schema_root" "$GITHUB_WORKSPACE/$MODULE_DIR/SchemaEntity"
+          if [[ "$BUILD_ROOT" == "$MODULE_DIR" ]]; then
+            schema_link="$GITHUB_WORKSPACE/SchemaEntity"
+          else
+            schema_link="$GITHUB_WORKSPACE/$MODULE_DIR/SchemaEntity"
+          fi
+          rm -rf "$schema_link"
+          ln -s "$schema_root" "$schema_link"
           rm -rf "$MANIFEST_PATH"
           mkdir -p "$MANIFEST_PATH"
           cp -R "$GITHUB_WORKSPACE/external/metamod-source/hl2sdk-manifests/." "$MANIFEST_PATH/"
