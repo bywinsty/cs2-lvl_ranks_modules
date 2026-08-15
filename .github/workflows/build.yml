@@ -143,6 +143,7 @@ jobs:
           test -f "$MANIFEST_PATH/manifests/cs2.json"
           test -f "$GITHUB_WORKSPACE/external/hl2sdk-cs2/public/tier1/generichash.h"
           test ! -f "$GITHUB_WORKSPACE/external/hl2sdk-cs2/tier1/generichash.cpp"
+          sed -i "/tier1', 'generichash.cpp/d" "$GITHUB_WORKSPACE/$BUILD_ROOT/AMBuildScript"
           ! grep -q "tier1', 'generichash.cpp" "$GITHUB_WORKSPACE/$BUILD_ROOT/AMBuildScript"
       - name: Configure and build
         env:
