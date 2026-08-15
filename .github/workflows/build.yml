@@ -1,7 +1,9 @@
 name: Build LR Modules
 on:
+  push:
+    branches: [dev]
   pull_request:
-    branches: [dev, PR, main]
+    branches: [PR, main]
   workflow_dispatch:
 
 permissions:
@@ -187,7 +189,7 @@ jobs:
           checksum="$GITHUB_WORKSPACE/${{ matrix.artifact_name }}.sha256"
           tar -czf "$archive" -C "$package_dir" addons
           sha256sum "$archive" > "$checksum"
-          printf 'module=%s\nbuild_root=%s\ncommit=%s\narch=x86_64\n' "${{ matrix.module }}" "$BUILD_ROOT" "${{ github.sha }}" > "$report"
+          printf 'module=%s\\nbuild_root=%s\\ncommit=%s\\narch=x86_64\\n' "${{ matrix.module }}" "$BUILD_ROOT" "${{ github.sha }}" > "$report"
           test -s "$archive" && test -s "$checksum" && test -s "$report"
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
